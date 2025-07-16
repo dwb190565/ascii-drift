@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Psychedelic ASCII Flow</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            width: 100vw;
+            background: #000000;
+            color: #fff;
+            position: relative;
+            cursor: default; /* Initial cursor */
+        }
+
+        #three-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0; /* Behind ASCII art */
+        }
+
+        #ascii-container {
+            padding: 30px;
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1; /* Above Three.js canvas */
+        }
+
+        #ascii-canvas {
+            line-height: 0.85;
+            letter-spacing: 0.05em;
+            color: rgba(0,0,0,0.85); /* Initial color, will be overridden */
+            user-select: none;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: transform 0.1s linear, color 0.1s linear;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="three-canvas"></canvas>
+    <div id="ascii-container">
+        <div id="ascii-canvas"></div>
+    </div>
+
+    <script>
+        // Global variables for ASCII art
+        let asciiCanvas;
+        let asciiWidth = 0;
+        let asciiHeight = 0;
+        let asciiGrid = [];
+        let asciiTime = 0;
+        let asciiAnimationFrameId;
+        let asciiResizeObserver;
+
+        const psychedelicChars = ['0', '1', '~', '*', '+', '#', '@', '%', '&', '$', 'X', 'Y', 'Z', 'A', 'B', 'C', '!', '?', '<', '>', '/', '\\', '|', '-', '=', '^', 'v', '>', '<', '(', ')', '[', ']', '{', '}'];
+        const numPsychedelicChars = psychedelicChars.length;
+
+        // Global variables for Three.js
+        let threeCanvas;
+        let scene, camera, renderer;
+        let particles;
+        let threeAnimationFrameId;
+
+        // Global variables for Tone.js
+        let audioStarted = false;
+        let audioInitiationPerformed = false; // To ensure audio setup runs only once
+
+        let droneSynth, droneFilter, droneReverb;
+        let rhythmSynth, rhythmDelay, rhythmLoop;
+        let blipSynth, blipDelay, blipPart;
+
+        // Interactive parameters (controlled by mouse)
+        let rotationFactor = 0.5;
+        let psychedelicIntensity = 1.0;
+
+        // --- ASCII Art Functions ---
+        function initAsciiGrid() {
+            asciiGrid = [];
+            for (let y = 0; y < asciiHeight; y++) {
+                let row = [];
+                for (let x = 0; x < asciiWidth; x++) {
+                    row.push(' ');
+                }
+                asciiGrid.push(row);
+            }
+        }
+
+        function renderAscii() {
+            let html = '';
+            for (let y = 0; y < asciiHeight; y++) {
+                for (let x = 0; x < asciiWidth; x++) {
+                    html += asciiGrid[y][x];
+                }
+                html += '<br>';
+            }
+            asciiCanvas.innerHTML = html;
+
+            const currentRotationSpeed = rotationFactor * 0.5;
+            const rotationAngle = (asciiTime * currentRotationSpeed) % 360;
+            asciiCanvas.style.transform = `rotate(${rotationAngle}deg)`;
+
+            const currentColorSpeed = psychedelicIntensity * 2;
+            const hue = (asciiTime * currentColorSpeed) % 360;
+            asciiCanvas.style.color = `hsl(${hue}, 80%, 50%)`;
+        }
+
+        function updateAscii() {
+            const t = asciiTime * 0.005;
+            const currentPsychedelicSpeed = asciiTime * 0.01 * psychedelicIntensity;
+
+            const blockSize = Math.min(asciiWidth, asciiHeight) / 2;
+            const blockX = Math.floor(asciiWidth / 2 - blockSize / 2);
+            const blockY = Math.floor(asciiHeight / 2 - blockSize / 2);
+
+            for (let y = 0; y < asciiHeight; y++) {
+                for (let x = 0; x < asciiWidth; x++) {
+                    const dx = x - asciiWidth / 2;
+                    const dy = y - asciiHeight / 2;
+                    const angle = Math.atan2(dy, dx);
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    const wave1 = Math.sin(dist * 0.2 - t + angle * 1.5);
+                    const wave2 = Math.cos(x * 0.08 + y * 0.04 + t * 0.4);
+                    const wave3 = Math.sin(x * 0.1 + Math.sin(y * 0.05 + t * 0.2) + t * 0.3);
+                    const wave4 = Math.cos(y * 0.07 - Math.cos(x * 0.03 + t * 0.1) + t * 0.6);
+
+                    const combinedWave = (wave1 + wave2 + wave3 + wave4) / 4;
+
+                    let charIndex = Math.floor((combinedWave + 1) / 2 * numPsychedelicChars + currentPsychedelicSpeed + (x + y) * 0.01) % numPsychedelicChars;
+                    charIndex = Math.abs(charIndex);
+                    asciiGrid[y][x] = psychedelicChars[charIndex];
+
+                    if (x >= blockX && x < blockX + blockSize &&
+                        y >= blockY && y < blockY + blockSize) {
+                        const innerX = x - blockX;
+                        const innerY = y - blockY;
+
+                        const innerWave = Math.sin(innerX * 0.5 + innerY * 0.3 + t * 0.5);
+                        const innerCharIndex = Math.floor((innerWave + 1) / 2 * numPsychedelicChars + currentPsychedelicSpeed * 2 + (innerX * innerY) * 0.005) % numPsychedelicChars;
+                        asciiGrid[y][x] = psychedelicChars[Math.abs(innerCharIndex)];
+
+                        if (Math.random() < 0.005 && asciiTime % 3 === 0) {
+                            asciiGrid[y][x] = ' ';
+                        } else if (Math.random() < 0.002 && asciiTime % 7 === 0) {
+                            asciiGrid[y][x] = '@';
+                        }
+                    }
+                }
+            }
+            asciiTime++;
+        }
+
+        function animateAscii() {
+            updateAscii();
+            renderAscii();
+            asciiAnimationFrameId = requestAnimationFrame(animateAscii);
+        }
+
+        function measureAndSetAsciiGridSize() {
+            const tempSpan = document.createElement('span');
+            tempSpan.style.fontFamily = 'monospace';
+            tempSpan.style.fontSize = '1em';
+            tempSpan.style.lineHeight = '0.85';
+            tempSpan.style.letterSpacing = '0.05em';
+            tempSpan.textContent = 'M';
+            asciiCanvas.appendChild(tempSpan);
+            const charWidth = tempSpan.offsetWidth;
+            const charHeight = tempSpan.offsetHeight;
+            asciiCanvas.removeChild(tempSpan);
+
+            const newWidth = Math.floor(asciiCanvas.clientWidth / charWidth);
+            const newHeight = Math.floor(asciiCanvas.clientHeight / charHeight);
+
+            if (newWidth !== asciiWidth || newHeight !== asciiHeight) {
+                asciiWidth = Math.max(40, Math.min(200, newWidth));
+                asciiHeight = Math.max(30, Math.min(150, newHeight));
+                initAsciiGrid();
+            }
+        }
+
+        // --- Three.js Functions ---
+        function initThree() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000, 0);
+
+            camera.position.set(0, 50, 150);
+            camera.lookAt(0, 0, 0);
+
+            const geometry = new THREE.BufferGeometry();
+            const numParticles = 50000;
+            const positions = new Float32Array(numParticles * 3);
+            const colors = new Float32Array(numParticles * 3);
+
+            const particleRange = 200;
+            const heightScale = 30;
+
+            const color = new THREE.Color();
+
+            for (let i = 0; i < numParticles; i++) {
+                const x = (Math.random() * 2 - 1) * particleRange;
+                const z = (Math.random() * 2 - 1) * particleRange;
+                const y = (Math.sin(x * 0.1) + Math.cos(z * 0.1) + Math.sin(x * 0.05 + z * 0.05)) * heightScale * 0.5 + Math.random() * heightScale * 0.2;
+
+                positions[i * 3] = x;
+                positions[i * 3 + 1] = y;
+                positions[i * 3 + 2] = z;
+
+                const hue = (y / heightScale) * 0.3 + (psychedelicIntensity * 0.1) % 1;
+                color.setHSL(hue, 0.8, 0.5);
+                colors[i * 3] = color.r;
+                colors[i * 3 + 1] = color.g;
+                colors[i * 3 + 2] = color.b;
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({
+                size: 0.8,
+                vertexColors: true,
+                blending: THREE.AdditiveBlending,
+                transparent: true,
+                opacity: 0.7
+            });
+
+            particles = new THREE.Points(geometry, material);
+            scene.add(particles);
+        }
+
+        function animateThree() {
+            threeAnimationFrameId = requestAnimationFrame(animateThree);
+
+            if (particles) {
+                particles.rotation.y += 0.0005 * rotationFactor;
+                particles.rotation.x += 0.0001 * psychedelicIntensity;
+            }
+
+            const camX = Math.sin(rotationFactor * Math.PI * 0.5) * 50;
+            const camY = 50 + (psychedelicIntensity - 1) * 20;
+            const camZ = 150 + Math.cos(psychedelicIntensity * Math.PI * 0.5) * 20;
+
+            camera.position.set(camX, camY, camZ);
+            camera.lookAt(0, 0, 0);
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResizeThree() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Audio Functions ---
+        async function setupAudio() {
+            if (audioInitiationPerformed) return; // Ensure audio setup runs only once
+
+            try {
+                await Tone.start();
+                audioStarted = true;
+                audioInitiationPerformed = true;
+                document.body.style.cursor = 'grab'; // Change cursor after audio starts
+
+                // --- Audio Setup ---
+                const masterReverb = new Tone.Reverb(5).toDestination();
+                masterReverb.wet.value = 0.5;
+
+                droneSynth = new Tone.AMSynth({
+                    harmonicity: 2,
+                    oscillator: { type: "sine" },
+                    envelope: { attack: 2, decay: 1, sustain: 0.8, release: 5 },
+                    modulation: { type: "square" },
+                    modulationEnvelope: { attack: 3, decay: 0.5, sustain: 0.2, release: 0.1 }
+                });
+                droneFilter = new Tone.Filter(2000, "lowpass");
+                droneSynth.chain(droneFilter, masterReverb);
+                droneSynth.triggerAttack("C2");
+
+                rhythmSynth = new Tone.MembraneSynth({
+                    pitchDecay: 0.05, octaves: 8,
+                    envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 0.8, attackCurve: "exponential" }
+                });
+                rhythmDelay = new Tone.FeedbackDelay("8n", 0.5);
+                rhythmSynth.chain(rhythmDelay, masterReverb);
+                rhythmLoop = new Tone.Loop(time => {
+                    rhythmSynth.triggerAttackRelease("C3", "8n", time);
+                }, "4n").start(0);
+
+                blipSynth = new Tone.MetalSynth({
+                    frequency: 200,
+                    envelope: { attack: 0.001, decay: 0.1, sustain: 0.01, release: 0.05 },
+                    harmonicity: 3.1, modulationIndex: 23, resonance: 4000, octaves: 1.5
+                });
+                blipDelay = new Tone.PingPongDelay("4n", 0.2);
+                blipSynth.chain(blipDelay, masterReverb);
+                blipPart = new Tone.Part((time, value) => {
+                    blipSynth.triggerAttackRelease(value.note, value.duration, time);
+                }, [
+                    { time: "0", note: "C4", duration: "16n" }, { time: "0:2", note: "G4", duration: "8n" },
+                    { time: "0:3", note: "C5", duration: "16n" }, { time: "1:1", note: "D#4", duration: "8n" },
+                    { time: "1:3", note: "F4", duration: "16n" }, { time: "2:0", note: "A4", duration: "8n" },
+                    { time: "2:2", note: "C#5", duration: "16n" }, { time: "3:1", note: "E4", duration: "8n" },
+                    { time: "3:3", note: "G#4", duration: "16n" },
+                ]).start(0);
+                blipPart.loop = true;
+                blipPart.loopEnd = "4m";
+
+                Tone.Transport.start();
+
+            } catch (error) {
+                console.error("Error starting Tone.js:", error);
+            }
+        }
+
+        function updateAudioParameters() {
+            if (!audioStarted) return;
+
+            if (droneFilter) {
+                const filterFreq = Tone.Midi(60 + (psychedelicIntensity - 0.5) * 10).toFrequency();
+                droneFilter.frequency.rampTo(filterFreq, 0.1);
+                droneSynth.set({ detune: (psychedelicIntensity - 1.0) * 500 });
+            }
+
+            if (rhythmLoop) {
+                const interval = Tone.Time(1.0 / (rotationFactor * 0.8)).toNotation();
+                rhythmLoop.interval = interval;
+            }
+
+            if (blipPart) {
+                blipPart.playbackRate = 0.5 + (psychedelicIntensity * 0.5);
+            }
+        }
+
+        // --- Event Handlers ---
+        function handleMouseMove(event) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+
+            const normalizedX = x / rect.width;
+            const normalizedY = y / rect.height;
+
+            rotationFactor = 0.1 + normalizedX * 1.9;
+            psychedelicIntensity = 0.5 + normalizedY * 2.5;
+
+            // Update audio parameters immediately on mouse move if audio is started
+            updateAudioParameters();
+        }
+
+        // --- Initialization on Window Load ---
+        window.onload = function() {
+            asciiCanvas = document.getElementById('ascii-canvas');
+            threeCanvas = document.getElementById('three-canvas');
+
+            // Initial setup for ASCII art
+            measureAndSetAsciiGridSize();
+            asciiAnimationFrameId = requestAnimationFrame(animateAscii);
+            asciiResizeObserver = new ResizeObserver(() => {
+                measureAndSetAsciiGridSize();
+            });
+            asciiResizeObserver.observe(asciiCanvas);
+
+            // Initial setup for Three.js
+            initThree();
+            threeAnimationFrameId = requestAnimationFrame(animateThree);
+            window.addEventListener('resize', onWindowResizeThree);
+
+            // Add event listeners for audio initiation
+            window.addEventListener('pointerdown', setupAudio, { once: true });
+            window.addEventListener('keydown', setupAudio, { once: true });
+
+            // Add mouse move listener to the main body/container
+            document.body.addEventListener('mousemove', handleMouseMove);
+        };
+
+        // --- Cleanup on Window Unload ---
+        window.onbeforeunload = function() {
+            // ASCII Art Cleanup
+            if (asciiAnimationFrameId) {
+                cancelAnimationFrame(asciiAnimationFrameId);
+            }
+            if (asciiResizeObserver) {
+                asciiResizeObserver.disconnect();
+            }
+            if (asciiCanvas) {
+                asciiCanvas.innerHTML = '';
+            }
+
+            // Three.js Cleanup
+            if (threeAnimationFrameId) {
+                cancelAnimationFrame(threeAnimationFrameId);
+            }
+            window.removeEventListener('resize', onWindowResizeThree);
+            if (renderer) {
+                renderer.dispose();
+            }
+            if (scene) {
+                scene.traverse((object) => {
+                    if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
+                        object.geometry.dispose();
+                        if (object.material instanceof THREE.Material) {
+                            object.material.dispose();
+                        } else if (Array.isArray(object.material)) {
+                            object.material.forEach(material => material.dispose());
+                        }
+                    }
+                });
+            }
+
+            // Tone.js Cleanup
+            if (audioInitiationPerformed) {
+                Tone.Transport.stop();
+                Tone.Transport.cancel();
+                droneSynth?.dispose();
+                droneFilter?.dispose();
+                droneReverb?.dispose();
+                rhythmSynth?.dispose();
+                rhythmDelay?.dispose();
+                rhythmLoop?.dispose();
+                blipSynth?.dispose();
+                blipDelay?.dispose();
+                blipPart?.dispose();
+            }
+
+            // Remove main event listeners
+            window.removeEventListener('pointerdown', setupAudio);
+            window.removeEventListener('keydown', setupAudio);
+            document.body.removeEventListener('mousemove', handleMouseMove);
+        };
+    </script>
+</body>
+</html>
